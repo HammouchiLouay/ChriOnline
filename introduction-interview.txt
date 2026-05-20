@@ -1,0 +1,20 @@
+Introduction rapide — avant la présentation des classes
+(ChriOnline)
+
+---
+
+Bonjour,
+
+Je vais vous présenter **ChriOnline**, une application e-commerce que nous avons développée : côté **serveur**, un processus Java qui expose une **API par sockets TCP** et parle à une base **MySQL** ; côté **client**, une interface **JavaFX** pour parcourir le catalogue, gérer un panier, passer des commandes et gérer le compte utilisateur.
+
+L’architecture est volontairement simple : le client ne se connecte pas directement à la base de données ; tout passe par le serveur, ce qui centralise la logique métier et la sécurité — par exemple le **hachage des mots de passe** et la **gestion des sessions** côté serveur.
+
+Dans ce qui suit, je détaille **les classes** : leur rôle, leurs méthodes principales et comment elles s’enchaînent. N’hésitez pas à m’interrompre si vous voulez un point précis.
+
+Merci, on peut commencer.
+
+---
+
+Version courte (30 secondes)
+
+« ChriOnline est un mini e-commerce : serveur Java + socket + MySQL, client JavaFX. Je vais enchaîner sur la structure du code et les classes principales. »

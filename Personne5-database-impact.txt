@@ -1,0 +1,51 @@
+================================================================================
+ChriOnline — Personne 5 : impact base de données MySQL
+================================================================================
+Titre du poste (référence) : responsable paiement simulé, historique et moyens
+enregistrés — Personne 5.
+
+Schéma de référence : sql/chrionline_schema_all.sql
+
+--------------------------------------------------------------------------------
+Tables dédiées paiement
+--------------------------------------------------------------------------------
+
+historique_paiement
+  - INSERT à chaque tentative de simulation (commande_id, user_id,
+    type_paiement, id_paiement_simule, statut, montant_final, message_resume,
+    created_at).
+  - FK : commande_id → orders.order_id ; user_id → user.id_user.
+
+methode_paiement_enregistree
+  - INSERT : gabarit masqué (type_paiement, display_label, template_json) si
+    l’utilisateur choisit de mémoriser un moyen après paiement réussi.
+  - SELECT / DELETE : liste et suppression par utilisateur
+    (services.SavedPaymentService).
+
+--------------------------------------------------------------------------------
+Table partagée avec la chaîne commande
+--------------------------------------------------------------------------------
+
+orders
+  - UPDATE du champ status (typiquement vers PAYEE ou ANNULEE après simulation)
+    via persistence.CommandeDAO.updateStatus, appelé depuis
+    services.SocketPaymentService après ecommerce.personne5.service.PaiementService.
+
+order_lines
+  - Pas de mise à jour directe dans le flux paiement ; le total a déjà été
+    figé à la création de commande.
+
+--------------------------------------------------------------------------------
+Lecture
+--------------------------------------------------------------------------------
+
+orders (+ chargement modèle models.Commande) pour validation du paiement
+(commandeId, userId, statut déjà PAYEE/ANNULEE interdits selon règles).
+
+--------------------------------------------------------------------------------
+Résumé
+--------------------------------------------------------------------------------
+
+Impact principal : **historique_paiement**, **methode_paiement_enregistree**,
+mise à jour **orders.status**. Module `ecommerce.personne5` : logique métier en
+mémoire ; persistance ChriOnline via les DAO ci-dessus.

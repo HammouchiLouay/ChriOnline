@@ -1,0 +1,134 @@
+================================================================================
+ChriOnline — Personne 2 : documentation finale (classes et méthodes)
+================================================================================
+Périmètre : catalogue MySQL (table `products`), catégories, détail produit,
+mise à jour du stock ; soumission vendeur et modération admin (`listing_status`) ;
+normalisation d’affichage ; images côté client (WebP). Le serveur ouvre JDBC ;
+les clients passent par TCP et des messages JSON (`common.Message`) ; listes et
+détail produit en charge utile Base64 après sérialisation binaire.
+
+Titre du poste : responsable catalogue, fiches produits et stock (Personne 2).
+
+Table des matières
+  A. DTO et modèle produit (product.*)
+  B. Accès SQL et catalogue (product.*)
+  C. Services socket (services.ProductService, services.ProductListingService)
+  D. Normalisation UI et images (common.*, ui.*)
+  E. Routage serveur (server.RequestRouter)
+  F. Récapitulatif des types de messages Personne 2
+
+--------------------------------------------------------------------------------
+A. DTO et modèle produit (product.*)
+--------------------------------------------------------------------------------
+
+--- product.Product ---
+Rôle : objet sérialisable (Serializable) pour transfert réseau (liste / détail).
+
+  Product() — constructeur vide.
+  Product(id, name, description, price, stock) — ancien minimal.
+  Product(id, name, description, price, stock, imageUrl, category, brand, rating)
+      — complet ; chaînes nulles normalisées en "" pour URL, catégorie, marque.
+  getId() / getName() / getDescription() / getPrice() / getStock()
+  setStock(int) — mise à jour locale (fallback mémoire ou après sync).
+  getImageUrl/setImageUrl, getCategory/setCategory, getBrand/setBrand,
+  getRating/setRating
+
+--- product.ProductListingInfo (record) ---
+Rôle : fiche pour modération ou espace vendeur (hors modèle Product catalogue).
+
+  Champs : productId, nomProduit, sku, sellerId, listingStatus, submittedAtMs,
+        rejectionReason.
+
+--------------------------------------------------------------------------------
+B. Accès SQL et catalogue (product.*)
+--------------------------------------------------------------------------------
+
+--- product.ProductCatalogDAO ---
+Rôle : requêtes préparées sur `products` ; méthodes statiques ; catalogue public
+filtré sur listing_status APPROVED (ou NULL).
+
+  loadAll(), loadByCategory(String), loadPage(offset, limit),
+  loadPageByCategory(category, offset, limit), findByProductId(int),
+  updateStock(productId, newStock) — UPDATE stock.
+  insertPendingListing(...) — INSERT fiche PENDING (vendeur).
+  listPending(), listBySellerId(sellerId) — listes pour admin / vendeur.
+  approve(productId, adminUserId), reject(productId, adminUserId, reason)
+      — UPDATE listing_status, reviewed_at, reviewed_by_user_id, rejection_reason.
+
+Méthodes privées : mapRows, mapRow, mapListingInfo — normalisation
+TextUiNormalizer sur nom, description, catégorie, marque.
+
+--- product.ProductRepository ---
+Rôle : façade JDBC ; fallback liste en mémoire si la base échoue.
+
+  getAll(), getByCategory(String), getPage(category, offset, limit),
+  findById(String id) — Optional<Product>.
+  distinctCategories() — LinkedHashSet avec « Tous » en tête.
+  updateStock(String id, int newStock).
+
+--------------------------------------------------------------------------------
+C. Services socket (services.*)
+--------------------------------------------------------------------------------
+
+--- services.ProductService ---
+Rôle : PRODUCT_LIST, PRODUCT_CATEGORIES, PRODUCT_DETAILS, STOCK_UPDATE.
+
+  list(Message) — payload vide ou JSON category, limit, offset ; sérialise
+      List<Product> en binaire puis Base64 ; erreur SERIALIZATION_ERROR.
+  details(Message) — payload = id produit texte ; un Product en Base64 ou NOT_FOUND.
+  updateStock(Message) — payload Base64 → UpdateStockRequest (id, stock) ;
+      ProductRepository.updateStock.
+  categories(Message) — JSON tableau de catégories avec « Tous » en premier.
+
+  Classe interne UpdateStockRequest : id String, int stock.
+
+--- services.ProductListingService ---
+Rôle : soumission vendeur et modération (sessionToken + rôle SELLER / ADMIN).
+
+  submit(Message) — SUBMIT_PRODUCT_LISTING, INSERT PENDING via UserDAO + isSeller.
+  listPending(Message) — LIST_PENDING_PRODUCTS, admin, ProductCatalogDAO.listPending.
+  listMine(Message) — LIST_MY_PRODUCT_LISTINGS, vendeur, listBySellerId.
+  approve(Message) / reject(Message) — APPROVE_PRODUCT_LISTING / REJECT_PRODUCT_LISTING.
+
+  parseJsonPayload, resolveSessionUser (SessionRegistry), isAdmin, isSeller,
+  toJsonArray, esc, err — utilitaires privés.
+
+--------------------------------------------------------------------------------
+D. Normalisation UI et images (common.*, ui.*)
+--------------------------------------------------------------------------------
+
+--- common.TextUiNormalizer ---
+  normalizeFrenchUi(String) — affichage fiable (accents / libellés).
+  categoryMatchVariants(String) — variantes pour SQL IN (...) sur catégories.
+
+--- ui.ProductImageLoader ---
+  Chargement d’images (ex. WebP) pour la grille catalogue ; dépendance
+  TwelveMonkeys ImageIO dans pom.xml.
+
+--- ui.ChriOnlineClientApp (partie catalogue) ---
+  Grille produits, fiche détail, filtres catégorie ; décodage Base64 /
+  désérialisation liste Product (voir JsonUtil côté client).
+
+--------------------------------------------------------------------------------
+E. Routage serveur (server.RequestRouter)
+--------------------------------------------------------------------------------
+
+Types délégués à ProductService / ProductListingService :
+  PRODUCT_LIST, PRODUCT_CATEGORIES, PRODUCT_DETAILS, STOCK_UPDATE,
+  SUBMIT_PRODUCT_LISTING, LIST_PENDING_PRODUCTS, LIST_MY_PRODUCT_LISTINGS,
+  APPROVE_PRODUCT_LISTING, REJECT_PRODUCT_LISTING.
+
+--------------------------------------------------------------------------------
+F. Récapitulatif des types de messages Personne 2
+--------------------------------------------------------------------------------
+
+PRODUCT_LIST — liste catalogue (option pagination / catégorie).
+PRODUCT_CATEGORIES — tableau JSON de catégories.
+PRODUCT_DETAILS — un produit par id.
+STOCK_UPDATE — mise à jour stock (binaire Base64).
+SUBMIT_PRODUCT_LISTING — fiche vendeur PENDING.
+LIST_PENDING_PRODUCTS — file d’attente admin.
+LIST_MY_PRODUCT_LISTINGS — fiches du vendeur connecté.
+APPROVE_PRODUCT_LISTING / REJECT_PRODUCT_LISTING — modération admin.
+
+Pour le détail pédagogique : docs/equipe/PERSONNE-02-PRODUITS.md.

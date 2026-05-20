@@ -1,0 +1,53 @@
+================================================================================
+ChriOnline — Personne 1 : impact base de données MySQL
+================================================================================
+Titre du poste (référence) : gestion des utilisateurs, authentification, profil,
+e-mails (vérification / OTP / reset), suppression de compte.
+
+Schéma de référence : sql/chrionline_schema_all.sql
+
+--------------------------------------------------------------------------------
+Tables directement lues / écrites par les classes Personne 1
+--------------------------------------------------------------------------------
+
+`user`
+  - Colonnes utilisées en routine : id_user, username, hash_password, email,
+    phone_number, date_creation, role, email_verified.
+  - Accès principal : chrionline.UserDAO, chrionline.Authentification.
+  - Opérations typiques : INSERT (inscription), SELECT (login, profil), UPDATE
+    (mot de passe, e-mail, téléphone, username, email_verified), DELETE (fin de
+    vie du compte via suppression explicite).
+
+--------------------------------------------------------------------------------
+Suppression de compte (effet transversal sur d’autres tables)
+--------------------------------------------------------------------------------
+
+services.AccountDeletionService + persistence.AccountDeletionDAO suppriment
+l’utilisateur **et** les données liées, dans un ordre compatible avec les clés
+étrangères :
+
+  - historique_paiement (DELETE WHERE user_id = ?) — table ignorée si absente
+    (erreur MySQL 1146).
+  - order_lines — lignes des commandes de l’utilisateur (DELETE joint sur orders).
+  - orders — toutes les commandes de l’utilisateur.
+  - methode_paiement_enregistree (DELETE WHERE user_id = ?) — optionnelle / 1146.
+  - user — ligne du compte (DELETE WHERE id_user = ?).
+
+Ces tables ne sont pas « possédées » par la Personne 1 au quotidien, mais une
+suppression de compte les vide pour cet utilisateur.
+
+--------------------------------------------------------------------------------
+Données hors MySQL (mais liées au périmètre auth)
+--------------------------------------------------------------------------------
+
+  - Jetons de session : server.SessionRegistry (mémoire processus), pas de table
+    session en base.
+  - Codes OTP / reset / vérification e-mail : maps en mémoire dans les services
+    (TTL), pas de table dédiée dans le schéma fourni.
+
+--------------------------------------------------------------------------------
+Résumé
+--------------------------------------------------------------------------------
+
+Impact principal : table `user`. Impact indirect fort lors de DELETE_ACCOUNT :
+historique_paiement, order_lines, orders, methode_paiement_enregistree, puis user.

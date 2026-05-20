@@ -1,0 +1,181 @@
+ChriOnline — Personne 1 reference (English)
+Scope: user accounts, login/register, session tokens, email verification and OTP, password reset, profile updates, account deletion, client session/prefs, socket routing for those features, and secured order listing by session. Server-only JDBC; clients use TCP JSON messages (common.Message).
+
+chrionline.User
+Domain bean for one row of table `user`.
+User() — empty constructor for DAO/forms.
+User(id, username, hash_password, email, phone_number, date_creation, role, emailVerified) — full constructor.
+get_id_user, get_username, get_hash_password, get_email, get_phone_number, get_date_creation, get_role — getters.
+isEmailVerified — true if email was verified.
+set_id_user, set_username, set_hash_password, set_email, set_phone_number, set_date_creation, set_role — setters; throw IllegalArgumentException if null where required.
+setEmailVerified(boolean) — sets verification flag only.
+
+chrionline.UserDAO
+JDBC access to `user`; one instance uses one Connection.
+UserDAO(Connection) — stores connection for all calls.
+getNextUserId — next id when id_user is not AUTO_INCREMENT (MAX+1).
+createUser(User) — INSERT full row including email_verified.
+findById — load by id_user or null.
+findByEmail — exact email match or null.
+emailExists — true if email already in table.
+findByPhoneNumber — match phone_number INT or null.
+phoneNumberExists — true if phone already used.
+updateUsername, updatePassword, updateEmail, updatePhoneNumber — UPDATE one field.
+deleteUser — DELETE row by id.
+updateEmailVerified — set email_verified column.
+mapUser, readEmailVerified — private mapping from ResultSet (readEmailVerified tolerates missing column).
+
+chrionline.BaseDonnees
+MySQL entry point for the server process only.
+getConnection — new JDBC connection (URL from CHRIONLINE_JDBC_URL or default localhost chrionline; user/password from env or root/empty).
+verifyConnection — runs SELECT 1 for health checks (e.g. PING).
+
+chrionline.Authentification
+Business rules for register/login (no socket types).
+Authentification(Connection) — builds UserDAO on same connection.
+register(User) — false if email or phone exists; else createUser and true. Caller must already set BCrypt hash on user.
+loginByEmailOrPhone(emailOrPhone, plainPassword) — finds user (email if contains @, else normalized phone), verifies password with PasswordHasher, optional rehash/migration to BCrypt; returns User or null.
+findUserForLogin — private resolver for email vs phone.
+buildSampleUser — static factory for demos (hashed password, today’s date).
+
+chrionline.PhoneNumberLookup
+Maps user input to INT stored in `user.phone_number`.
+digitsOnly — strips non-digits.
+parseStoredPhoneInt — parses digit string to Integer; handles overflow and +33/0033 and fallback to last 9 digits.
+
+chrionline.TestConnexion
+main — opens BaseDonnees.getConnection and prints OK or SQL error (JDBC smoke test).
+
+common.Message
+Socket protocol envelope: type, requestId, status, payload, errorCode.
+Constructors, getters, setters — field access.
+request(type, requestId, payload) — builds outgoing request with empty status and errorCode.
+
+common.JsonUtil
+toJson(Message) / fromJson(String) — line protocol for Message.
+toMap(String) — flat JSON object to Map<String,String> (simple payloads).
+splitTopLevel — private comma split respecting nested braces.
+toBinary / fromBinary — Java serialization for non-auth payloads (e.g. products).
+
+common.PasswordHasher
+hash(plain) — BCrypt hash for storage.
+verify(plain, stored) — BCrypt checkpw if stored looks like BCrypt; else plain compare for legacy migration.
+needsRehash(stored) — true if stored is not BCrypt (should upgrade on next good login).
+
+common.MaskingUtil
+maskEmail — partial mask for forgot-password hints.
+maskPhoneDigits — partial mask for phone hints.
+
+common.TextUiNormalizer
+normalizeFrenchUi — fixes garbled/accented category labels for UI.
+categoryMatchVariants — list of DB variants for category filter (e.g. Vetements vs Vêtements).
+
+common.ClientPrefs
+runQuietly — runs Runnable; swallows SecurityException/IllegalStateException.
+getString, getInt, getBoolean — read java.util.prefs with defaults on failure.
+putString, putInt, putBoolean, remove — write prefs without crashing UI.
+Session keys (client app node) — typically sessionToken, userId, role, username, email, phone, emailVerified for offline restore of the logged-in UI without storing the password.
+
+common.ClientConfigLoader
+userClientConfigPath — ~/.chrionline/chrionline-client.properties
+load — merge classpath chrionline-client.properties then user file.
+isAllowLoopback — system property chrionline.client.allow.loopback overrides client.allow.loopback (default true).
+
+server.SessionRegistry
+In-memory map (server process): opaque UUID session token → user id.
+issueToken(userId) — create token after successful LOGIN/REGISTER; returned in JSON as sessionToken.
+resolveUser(token) — resolve authenticated user id from token, or null if invalid.
+revoke(token) — remove token on LOGOUT.
+
+services.AuthService
+login(Message) — LOGIN: flat JSON email (or phone) + password; on success returns JSON with userId, username, email, phone, emailVerified, role, sessionToken (via SessionRegistry). Error codes include BAD_CREDENTIALS, DB_ERROR.
+register(Message) — REGISTER: username, email, password, phone; optional role (default CLIENT); schedules first verification email; on success returns user fields, role, sessionToken. Errors for invalid phone or duplicate email/phone.
+esc, err — private JSON escape and error Message builder.
+
+services.MailConfigLoader
+userConfigFilePath — ~/.chrionline/email-config.properties
+load — merge classpath, user file, CHRIONLINE_* env (blank user keys for password/api key do not wipe defaults).
+Private helpers loadClasspath, loadUserHome, applyEnvironment, putEnv.
+
+services.MailService
+reload — reload MailConfigLoader into static config.
+isMailConfigured — Resend key present or SMTP host+user+password present.
+logMailDiagnostics — startup SMTP/Resend hints without printing password.
+sendPlain — send mail or print to console if not configured.
+sendEmailVerification, sendPasswordResetCode, sendProfileSecurityCode — themed bodies with code.
+Private: Resend HTTP, SMTP send, JSON escape, SMTP user/from resolution.
+
+services.EmailVerificationService
+scheduleInitialVerificationEmail(userId) — daemon thread sends first code after register.
+sendCodeForUser, issueCode — private; generate 6-digit code, store with TTL, email user.
+send(Message) — EMAIL_VERIFY_SEND: resend code or alreadyVerified.
+confirm(Message) — EMAIL_VERIFY_CONFIRM: check code, set email_verified, clear pending.
+clearPendingForUser — remove in-memory code (e.g. account deleted).
+
+services.PasswordResetService
+forgotPassword(Message) — FORGOT_PASSWORD: email path requires verified email and emails code; phone path logs code to console; response may include maskedEmail or maskedPhone.
+resetPassword(Message) — RESET_PASSWORD: validate code, hash new password, clear pending.
+clearPendingForUser — remove pending resets for that user id.
+Private: keyEmail, keyPhoneDigits, buildForgotPayload, esc.
+
+services.ProfileSecurityService
+sendOtp(Message) — PROFILE_OTP_SEND: requires verified email; emails 6-digit OTP.
+verifyAndConsumeProfileOtp(userId, code) — one-time check and remove.
+clearPendingOtpForUser — clear OTP for user.
+
+services.ProfileService
+updateProfile(Message) — UPDATE_PROFILE: current password required; sensitive changes (password, email, phone) need verified email + valid securityOtp; checks uniqueness; returns updated profile JSON or error codes.
+
+services.AccountDeletionService
+deleteAccount(Message) — DELETE_ACCOUNT: password; if email verified also security OTP; JDBC transaction via AccountDeletionDAO; clears pending maps in reset/verify/profile services.
+
+persistence.AccountDeletionDAO
+deleteAllForUser(Connection, userId) — deletes related rows in safe order (optional payment history/saved methods ignored if table missing), then user.
+deleteOrderLinesForUser, deleteOptionalTable — private helpers.
+
+server.RequestRouter
+route(Message) — dispatches by type; Personne 1 auth/profile: PING, LOGIN, REGISTER, LOGOUT (revokes session token), FORGOT_PASSWORD, RESET_PASSWORD, EMAIL_VERIFY_SEND, EMAIL_VERIFY_CONFIRM, PROFILE_OTP_SEND, UPDATE_PROFILE, DELETE_ACCOUNT. Session-bound: GET_COMMANDES requires a valid sessionToken in the payload and uses SessionRegistry.resolveUser before listing orders for that user. Other types include products, payments, etc.
+
+ui.SocketApiClient (Personne 1 helpers)
+send(Message) — one TCP round-trip; reads one JSON response line.
+parseAuthUserId, parseAuthUsername, parseAuthEmail, parseAuthPhone, parseAuthEmailVerified — regex extract from LOGIN/REGISTER/profile JSON.
+parseAuthSessionToken — reads opaque session token string from JSON.
+parseAuthRole — reads role string for navigation (CLIENT, seller, admin, etc.).
+extractJsonStringValue — simple key read from small JSON objects.
+
+ui.UiMessages
+errorCode(code) — maps server error codes to short French user strings (BAD_CREDENTIALS, AUTH_REQUIRED, SESSION_INVALID, EMAIL_NOT_VERIFIED, BAD_OR_MISSING_OTP, etc.).
+genericFailure, networkFailure — fixed fallback strings.
+
+ui.ChriOnlineClientApp (Personne 1 — user management / session)
+JavaFX main client: server host/port, SocketApiClient lifecycle, sidebar login (submitSidebarLogin) as the primary login path, optional register and forgot-password dialogs with initOwner on the primary stage.
+start(Stage) — builds scene, loads ClientConfigLoader, calls restorePersistedSession.
+rebuildApiFromFields — rebuilds server URL and SocketApiClient after host/port changes.
+refreshSessionBanner — updates server/account status banner.
+submitSidebarLogin — builds LOGIN message, send(), applySession on success.
+openRegisterDialog — REGISTER flow in a modal dialog.
+openForgotPasswordDialog — FORGOT_PASSWORD / RESET_PASSWORD UI.
+applySession(jsonPayload) — parses session fields (including token and role), updates labels, setAccountLoggedInUi(true), persistSession, updateSessionRoleNav.
+persistSession / clearPersistedSession — read/write ClientPrefs session keys.
+restorePersistedSession — on startup, restores logged-in UI from prefs without password.
+logoutAccount — sends LOGOUT with token, clears prefs and UI.
+setAccountLoggedInUi — toggles sidebar between login form and logged-in block.
+updateSessionRoleNav — shows/hides nav entries by role (client / seller / admin).
+sendAccountEmailVerification, confirmAccountEmailVerification — account page email verification.
+sendProfileSecurityOtp, profile update submit — UPDATE_PROFILE with OTP when required.
+confirmAndDeleteAccount — DELETE_ACCOUNT flow.
+showAccountPage, showProfilePage, buildSidebar, and other builders — UI wiring for account and profile.
+
+org.mindrot.jbcrypt.BCrypt (bundled)
+Third-party bcrypt implementation; app uses it only through common.PasswordHasher.
+
+Message types (Personne 1 and session-related)
+PING — DB health.
+LOGIN, REGISTER — AuthService; responses include role and sessionToken.
+LOGOUT — revokes token (SessionRegistry).
+GET_COMMANDES — requires sessionToken; resolves user via SessionRegistry; returns orders for that user (ties auth to command listing).
+FORGOT_PASSWORD, RESET_PASSWORD — PasswordResetService.
+EMAIL_VERIFY_SEND, EMAIL_VERIFY_CONFIRM — EmailVerificationService.
+PROFILE_OTP_SEND — ProfileSecurityService.
+UPDATE_PROFILE — ProfileService.
+DELETE_ACCOUNT — AccountDeletionService.

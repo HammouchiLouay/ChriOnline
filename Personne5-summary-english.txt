@@ -1,0 +1,29 @@
+ChriOnline — Personne 5 reference (English)
+Scope: simulated payment module (`ecommerce.personne5`), socket bridge SIMULATE_PAYMENT, update ChriOnline `models.Commande` / `orders.status`, append rows to `historique_paiement`, optional masked saved methods in `methode_paiement_enregistree`. No real bank gateway.
+
+Job title: responsible for simulated payment, payment history, and saved payment methods (Person 5).
+
+ecommerce.personne5.model.Paiement
+Simulation result: amounts, StatutPaiement, TypePaiement, fraud score, token, message, etc.
+
+ecommerce.personne5.service.PaiementService
+Business engine: coupons, delivery fees, fraud checks, payment type switch, confirmerPaiement, rembourserPaiement, stats/audit helpers. Uses eco model Commande (String id) — distinct from server models.Commande.
+
+services.SocketPaymentService
+simulate(Message) — SIMULATE_PAYMENT JSON: commandeId, userId, typePaiement, optional coupon, saveTemplate fields. Loads server Commande, builds eco Commande, runs simulerPaiement + confirmerPaiement, PaymentHistoryDAO.insert, CommandeDAO.updateStatus, optional SavedPaymentMethodDAO.insert. Synchronized PAY_LOCK.
+
+services.SavedPaymentService
+LIST_SAVED_PAYMENT_METHODS, DELETE_SAVED_PAYMENT_METHOD.
+
+persistence.PaymentHistoryDAO
+insert per attempt.
+
+persistence.SavedPaymentMethodDAO
+insert, listByUser, deleteForUser, toJsonArray.
+
+RequestRouter
+SIMULATE_PAYMENT, LIST_SAVED_PAYMENT_METHODS, DELETE_SAVED_PAYMENT_METHOD.
+
+Database impact: see Personne5-database-impact.txt (`historique_paiement`, `methode_paiement_enregistree`, updates `orders`).
+
+Detailed French spec: docs/equipe/PERSONNE-05-PAIEMENT.md.

@@ -1,0 +1,89 @@
+================================================================================
+ChriOnline — Personne 4 : documentation finale (classes et méthodes)
+================================================================================
+Périmètre : création et cycle de vie des commandes en MySQL (tables `orders`,
+`order_lines`) ; validation, annulation, historique par utilisateur ; lien avec
+le catalogue pour prix et libellés au moment de CREATE_COMMANDE.
+
+Titre du poste : responsable des commandes, statuts et persistance
+(serveur & BDD) — Personne 4.
+
+Table des matières
+  A. Modèles domaine (models.*)
+  B. Persistance (persistence.CommandeDAO)
+  C. Métier (services.CommandeService)
+  D. Routage et messages réseau
+  E. Récapitulatif des types de messages Personne 4
+
+--------------------------------------------------------------------------------
+A. Modèles domaine (models.*)
+--------------------------------------------------------------------------------
+
+--- models.LigneCommande ---
+Serializable ; ligne figée (produit, nom, quantité, prix unitaire).
+
+  LigneCommande(), LigneCommande(produitId, nom, quantite, prixUnitaire)
+  getProduitId(), getNom(), getQuantite(), getPrixUnitaire()
+  calculerSousTotal() — quantite * prixUnitaire
+  toJson() — fragment JSON pour ligne
+  toString()
+
+--- models.Commande ---
+Agrégat : id, userId, lignes, statut, horodatage.
+
+  Commande(), Commande(int id, int userId) — statut initial EN_ATTENTE, date now.
+  getId/setId, getUserId, getLignes, getStatus/setStatus,
+  getDateCommandeMs/setDateCommandeMs
+  ajouterLigne(LigneCommande), supprimerLigne(int produitId)
+  calculerTotal() — somme des sous-totaux
+  toJson(), toString()
+
+--------------------------------------------------------------------------------
+B. Persistance (persistence.CommandeDAO)
+--------------------------------------------------------------------------------
+
+  insert(Connection, Commande) — transaction : INSERT orders, récupère order_id,
+      insert batch order_lines, commit.
+  findById(int), findById(Connection, int) — en-tête + lignes (LEFT JOIN products
+      pour le nom si applicable).
+  findByUserId(int) — toutes les commandes utilisateur, lignes chargées.
+  updateStatus(orderId, newStatus) — UPDATE orders SET status.
+  valider(orderId) — EN_ATTENTE → VALIDE uniquement si statut actuel OK.
+  annuler(orderId) — ANNULEE si statut ni VALIDE ni PAYEE.
+
+Méthodes privées : insertLignes, mapCommande, loadLignes.
+
+--------------------------------------------------------------------------------
+C. Métier (services.CommandeService)
+--------------------------------------------------------------------------------
+
+Toutes les méthodes statiques ; SQLException possible.
+
+  createCommande(int userId, double total) — cas simplifié une ligne synthétique.
+  createCommandeAvecProduits(int userId, String produitsData) — parse id:qty;…,
+      enrichit via ProductRepository.findById, puis CommandeDAO.insert.
+  validerCommande(int id), annulerCommande(int id)
+  getCommandesByUser(int userId), getCommandeById(int id)
+  updateCommandeStatus(int id, String status) — ex. PAYEE / ANNULEE (paiement).
+
+--------------------------------------------------------------------------------
+D. Routage et messages réseau
+--------------------------------------------------------------------------------
+
+server.RequestRouter délègue CREATE_COMMANDE, VALIDER_COMMANDE, ANNULER_COMMANDE,
+GET_COMMANDES (avec sessionToken → SessionRegistry.resolveUser pour GET_COMMANDES
+selon implémentation actuelle).
+
+Payload CREATE_COMMANDE (rappel) :
+  {"userId":"…","produits":"83:2;84:1"} ou {"userId":"…","total":"…"}
+
+--------------------------------------------------------------------------------
+E. Récapitulatif des types de messages Personne 4
+--------------------------------------------------------------------------------
+
+CREATE_COMMANDE — création avec lignes ou total simplifié.
+VALIDER_COMMANDE — EN_ATTENTE → VALIDE.
+ANNULER_COMMANDE — annulation si statut autorisé.
+GET_COMMANDES — liste JSON des commandes (utilisateur issu de la session).
+
+Pour le détail : docs/equipe/PERSONNE-04-COMMANDES.md.

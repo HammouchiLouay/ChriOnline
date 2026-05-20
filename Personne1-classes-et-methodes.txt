@@ -1,0 +1,587 @@
+================================================================================
+ChriOnline — Personne 1 : documentation finale (classes et méthodes)
+================================================================================
+Périmètre : gestion des utilisateurs, authentification (socket + MySQL), jetons de
+session, e-mail (verification / OTP / reset), suppression de compte, et support
+client JavaFX (session locale, préférences, connexion sidebar). Le serveur seul
+ouvre JDBC ; les clients distants passent par TCP (ServerMain / ClientHandler) et
+des messages JSON (common.Message).
+
+Table des matières
+  A. Concepts et mécanismes transverses
+  B. Modèle et accès données (chrionline.*)
+  C. Utilitaires communs (common.*)
+  D. Services socket (services.*)
+  E. Persistance suppression compte (persistence.*)
+  F. Jetons de session (server.SessionRegistry)
+  G. Routage serveur (server.RequestRouter)
+  H. Client JavaFX et utilitaires UI (ui.*, common côté client)
+  I. Récapitulatif des types de messages Personne 1
+
+--------------------------------------------------------------------------------
+A. Concepts et mécanismes transverses
+--------------------------------------------------------------------------------
+
+A.1 BCrypt (via org.mindrot.jbcrypt.BCrypt, vendu dans le projet)
+    - But : stocker un mot de passe sans le réversible ; le sel et le coût sont
+      inclus dans la chaîne (préfixes $2a$, $2b$, $2y$).
+    - BCrypt.hashpw(plain, BCrypt.gensalt(logRounds)) : génère un sel aléatoire
+      et applique Blowfish dans un schéma adaptatif (coût = 2^logRounds).
+    - BCrypt.checkpw(plain, hash) : recalcule le hash avec le sel extrait de la
+      chaîne stockée et compare en temps constant (résiste aux timings basiques).
+    - Pourquoi « log rounds » : chaque incrément double le travail CPU (ici 12).
+
+A.2 JDBC (java.sql)
+    - Connection : session vers MySQL ; PreparedStatement injecte les paramètres
+      avec setInt/setString (évite l’injection SQL).
+    - try-with-resources ferme Statement/Connection automatiquement.
+    - BaseDonnees.getConnection() : une nouvelle connexion par appel ; les services
+      utilisent un bloc try (Connection c = …) par requête métier.
+
+A.3 JsonUtil.toMap(String json)
+    - Parseur JSON minimal pour des objets « plats » : paires "clé":"valeur".
+    - Retire { } puis découpe par virgules au niveau racine (splitTopLevel) en
+      respectant la profondeur des { } pour ne pas couper à l’intérieur d’un sous-
+      objet (variable depth). Les valeurs sont des chaînes entre guillemets ; pas
+      d’échappement JSON complet (usage interne contrôlé).
+    - Limite : payloads simples (LOGIN, REGISTER, etc.) — pas de tableaux JSON.
+
+A.4 Message (protocole socket)
+    - Champs : type, requestId, status (SUCCESS/ERROR), payload (corps JSON texte),
+      errorCode (code machine si ERROR).
+    - Message.request(type, id, payload) construit une requête sans status.
+
+A.5 Maps en mémoire (ConcurrentHashMap)
+    - Codes OTP / reset / vérification e-mail : clés userId ou "e:email" / "p:612…".
+      ConcurrentHashMap permet plusieurs threads clients sans synchronisation lourde.
+    - TTL : expiryMs comparé à System.currentTimeMillis() à la lecture.
+
+A.6 java.util.prefs (ClientPrefs)
+    - Persistance optionnelle sur la machine cliente (registre Windows / fichier
+      selon JVM). Les méthodes catch SecurityException pour ne pas bloquer l’UI.
+
+A.7 Normalisation téléphone (chrionline.PhoneNumberLookup)
+    - La colonne MySQL phone_number est INT ; les numéros « +33 6… » produisent
+      plus de 10 chiffres et dépassent Integer.MAX_VALUE si on parse naïvement.
+    - Long.parseLong puis, si hors plage int, règles FR (+33 / 0033) puis repli
+      sur les 9 derniers chiffres.
+
+--------------------------------------------------------------------------------
+B. Modèle et accès données (chrionline)
+--------------------------------------------------------------------------------
+
+--- chrionline.User ---
+Rôle : bean JDBC pour la table `user` (une ligne = un compte).
+
+Champs : id_user, username, hash_password, email, phone_number, date_creation,
+         role, emailVerified (booléen « e-mail vérifié »).
+
+Méthodes (toutes publiques sauf mention) :
+  User()
+      Constructeur vide pour instanciation puis setters (DAO, formulaires).
+  User(Integer id_user, String username, String hash_password, String email,
+       Integer phone_number, Date date_creation, String role, boolean emailVerified)
+      Constructeur complet.
+  get_id_user() → Integer
+  get_username() → String
+  get_hash_password() → String   (BCrypt ou legacy ; ne jamais logger en clair)
+  get_email() → String
+  get_phone_number() → Integer
+  get_date_creation() → java.sql.Date
+  get_role() → String
+  isEmailVerified() → boolean
+  set_id_user(Integer) — IllegalArgumentException si null
+  set_username(String) — idem si null
+  set_hash_password(String) — idem si null (accepte hash BCrypt)
+  set_email(String) — idem si null
+  set_phone_number(Integer) — idem si null
+  set_date_creation(Date) — idem si null
+  set_role(String) — idem si null
+  setEmailVerified(boolean) — pas de garde null (booléen primitif logique)
+
+--- chrionline.UserDAO ---
+Rôle : requêtes préparées sur la table `user`. Une instance = une Connection.
+
+  UserDAO(Connection connexion)
+      Stocke la connexion pour toutes les méthodes.
+
+  int getNextUserId() throws SQLException
+      SELECT COALESCE(MAX(id_user),0)+1 — schéma sans AUTO_INCREMENT sur id_user.
+
+  void createUser(User user) throws SQLException
+      INSERT de toutes les colonnes utilisateur (dont email_verified).
+
+  User findById(int id_user) throws SQLException
+      SELECT * WHERE id_user = ? ; mapUser ou null.
+
+  User findByEmail(String email) throws SQLException
+      Égalité stricte sur la colonne email.
+
+  boolean emailExists(String email) throws SQLException
+      COUNT(*) > 0.
+
+  User findByPhoneNumber(Integer phone_number) throws SQLException
+      Égalité sur phone_number (INT).
+
+  boolean phoneNumberExists(Integer phone_number) throws SQLException
+      COUNT(*) > 0.
+
+  void updateUsername(Integer id_user, String username) throws SQLException
+  void updatePassword(Integer id_user, String hash_password) throws SQLException
+      hash_password = chaîne déjà hashée (PasswordHasher.hash).
+  void updateEmail(Integer id_user, String email) throws SQLException
+  void updatePhoneNumber(Integer id_user, Integer phone_number) throws SQLException
+  void deleteUser(Integer id_user) throws SQLException
+  void updateEmailVerified(int id_user, boolean verified) throws SQLException
+
+  private static User mapUser(ResultSet rs) throws SQLException
+      Construit User depuis une ligne ; phone via getInt, dates via getDate.
+
+  private static boolean readEmailVerified(ResultSet rs)
+      getBoolean("email_verified") ; si colonne absente (vieille BDD), retourne
+      false sans faire échouer le mapping.
+
+--- chrionline.Authentification ---
+Rôle : règles métier inscription / connexion (sans protocole socket).
+
+  Authentification(Connection connexion)
+      Crée un UserDAO sur la même connexion.
+
+  boolean register(User user) throws SQLException
+      Si emailExists ou phoneNumberExists → false ; sinon createUser → true.
+      Prérequis : hash_password déjà passé par PasswordHasher.hash côté appelant.
+
+  User loginByEmailOrPhone(String emailOrPhone, String plainPassword) throws SQLException
+      Étapes :
+      1) findUserForLogin(emailOrPhone) — null si inconnu.
+      2) PasswordHasher.verify(plain, stored) — false si mot de passe incorrect.
+      3) Si needsRehash(stored) : updatePassword + set_hash_password en mémoire
+         (migration plain → BCrypt).
+      Retourne User ou null.
+
+  private User findUserForLogin(String emailOrPhone) throws SQLException
+      - trim ; vide → null
+      - si '@' présent → findByEmail (identifiant e-mail)
+      - sinon digitsOnly + parseStoredPhoneInt → findByPhoneNumber ou null
+
+  static User buildSampleUser(int id, String username, String email, int phone,
+                              String plainPassword, String role)
+      Fabrique un User avec hash_password = PasswordHasher.hash(plainPassword),
+      date du jour, sans appeler setEmailVerified (reste false par défaut).
+
+--- chrionline.BaseDonnees ---
+Rôle : point d’entrée JDBC pour le processus serveur uniquement.
+
+  static Connection getConnection() throws SQLException
+      URL : env CHRIONLINE_JDBC_URL ou défaut jdbc:mysql://127.0.0.1:3306/chrionline
+      avec useSSL=false, serverTimezone=UTC, allowPublicKeyRetrieval=true.
+      Utilisateur : CHRIONLINE_DB_USER ou "root".
+      Mot de passe : CHRIONLINE_DB_PASSWORD ou "".
+
+  static void verifyConnection() throws SQLException
+      try-with-resources : getConnection + execute "SELECT 1" — santé MySQL
+      (PING, démarrage).
+
+--------------------------------------------------------------------------------
+C. Utilitaires communs (common)
+--------------------------------------------------------------------------------
+
+--- common.PasswordHasher ---
+Rôle : hachage et vérification pour la colonne hash_password.
+
+  static String hash(String plainPassword)
+      BCrypt avec BCRYPT_LOG_ROUNDS = 12. IllegalArgumentException si null.
+
+  static boolean verify(String plainPassword, String stored)
+      Si stored ressemble à un hash BCrypt ($ + '2' en position 1-2) :
+      BCrypt.checkpw ; IllegalArgumentException du parse → false.
+      Sinon : égalité chaîne (legacy plain — migration).
+
+  static boolean needsRehash(String stored)
+      true si non vide et pas un hash BCrypt (encore en clair en base).
+
+  private static boolean isBcryptHash(String stored)
+      Longueur ≥ 4 et caractères 0-1 = '$' et '2'.
+
+--- chrionline.PhoneNumberLookup ---
+Rôle : aligner saisie utilisateur et entier stocké (INT).
+
+  static String digitsOnly(String s)
+      replaceAll("\\D+", "") — supprime tout sauf 0-9 ; null → "".
+
+  static Integer parseStoredPhoneInt(String digitsOnly)
+      - Re-stripe les non-chiffres ; vide → null.
+      - Long.parseLong(d) ; si valeur dans [Integer.MIN, Integer.MAX] → (int) v.
+      - Si dépassement : si commence par "33" (longueur ≥ 11) → 9 chiffres après 33.
+      - Sinon si "0033" (longueur ≥ 13) → 9 chiffres après 0033.
+      - Sinon si longueur ≥ 9 → 9 derniers chiffres (repli).
+      - NumberFormatException ou échec → null.
+
+--- common.JsonUtil ---
+Rôle : sérialisation Message + parsing léger.
+
+  static String toJson(Message m)
+      Objet JSON avec champs type, requestId, status, payload, errorCode (chaînes
+      quotées avec échappement \ " newline).
+
+  static Message fromJson(String json)
+      Extraction par getField (scan manuel des guillemets et échappements).
+
+  static Map<String, String> toMap(String json)
+      Voir section A.3.
+
+  static String[] splitTopLevel(String s) private
+      Découpe par virgules hors accolades imbriquées.
+
+  static byte[] toBinary(Object obj) / static T fromBinary(byte[], Class<T>)
+      Sérialisation Java native (hors périmètre auth — catalogue binaire).
+
+--- common.Message ---
+Rôle : enveloppe protocole socket.
+
+  Champs : type, requestId, status, payload, errorCode.
+  Constructeur vide ; constructeur (type, requestId, status, payload, errorCode).
+  getters / setters pour chaque champ.
+  static Message request(String type, String requestId, String payload)
+      status et errorCode initialisés à "".
+
+--- common.MaskingUtil ---
+Rôle : indices visuels « mot de passe oublié » sans divulguer l’identifiant complet.
+
+  static String maskEmail(String email)
+      Coupe local@domain ; masque le local et le nom de domaine (***), garde une
+      partie des bords selon la longueur ; e-mail invalide → "***".
+
+  static String maskPhoneDigits(String digits)
+      Digits only ; masque en gardant souvent 2 chiffres de fin visibles.
+
+--- common.ClientPrefs ---
+Rôle : préférences utilisateur (session, dernier hôte) via java.util.prefs.
+      Côté client ChriOnline, le nœud de session stocke notamment sessionToken,
+      userId, role, username, email, phone, emailVerified (sans mot de passe).
+
+  static void runQuietly(Runnable op)
+      Exécute op ; ignore SecurityException / IllegalStateException.
+
+  static String getString / int getInt / boolean getBoolean(nodePath, key, def)
+  static void putString / putInt / putBoolean(nodePath, key, value)
+  static void remove(nodePath, key)
+      Tous catch SecurityException / IllegalStateException et retournent défaut
+      ou no-op.
+
+--- common.ClientConfigLoader ---
+Rôle : propriétés client (loopback, découverte LAN).
+
+  static Path userClientConfigPath()
+      ~/.chrionline/chrionline-client.properties
+
+  static Properties load()
+      Fusion : classpath /chrionline-client.properties puis fichier utilisateur
+      (les clés du fichier user écrasent).
+
+  static boolean isAllowLoopback(Properties merged)
+      Priorité à la propriété système -Dchrionline.client.allow.loopback puis
+      client.allow.loopback dans merged (défaut true).
+
+--------------------------------------------------------------------------------
+D. Services socket (services)
+--------------------------------------------------------------------------------
+
+--- services.AuthService ---
+Rôle : LOGIN et REGISTER ; payload = JSON plat via JsonUtil.toMap.
+
+  static Message login(Message request)
+      Exige payload non vide ; "email" (e-mail OU téléphone) + "password".
+      Connexion ; Authentification.loginByEmailOrPhone ; SessionRegistry.issueToken(userId) ;
+      SUCCESS avec JSON : userId, username, email, phone, emailVerified, role, sessionToken
+      (échappement esc sur chaînes).
+      Erreurs : EMPTY_PAYLOAD, MISSING_FIELDS, BAD_CREDENTIALS, DB_ERROR.
+
+  static Message register(Message request)
+      username, email, password, phone obligatoires ; phone normalisé par
+      PhoneNumberLookup ; rôle par défaut "CLIENT" (ou champ optionnel) ; emailVerified false ;
+      EmailVerificationService.scheduleInitialVerificationEmail(id) ;
+      SessionRegistry.issueToken(id) ; JSON de succès inclut role et sessionToken.
+      Erreurs : INVALID_PHONE, EMAIL_OR_PHONE_EXISTS, DB_ERROR, etc.
+
+  private static String esc(String s)
+      Antislash et guillemets pour JSON.
+
+  private static Message err(Message request, String code)
+      Même type/requestId, status ERROR, errorCode = code, payload vide.
+
+--- services.MailConfigLoader ---
+Rôle : fusion des sources de configuration mail (voir javadoc classe).
+
+  static Path userConfigFilePath()
+      ~/.chrionline/email-config.properties
+
+  static Properties load()
+      Ordre : classpath /email-config.properties → fichier user → variables
+      CHRIONLINE_* (putEnv). Les clés mail.smtp.password et resend.api.key vides
+      dans le fichier user ne remplacent pas une valeur classpath (SKIP_BLANK_USER_OVERLAY).
+
+  private static void loadClasspath / loadUserHome / applyEnvironment
+  private static void putEnv(Properties p, String envKey, String propKey)
+
+--- services.MailService ---
+Rôle : envoi réel (Resend HTTP ou SMTP Jakarta Mail) ou copie console.
+
+  static void reload()
+      Recharge MailConfigLoader.load() dans config statique.
+
+  static boolean isMailConfigured()
+      true si clé Resend non vide OU (hôte SMTP non vide ET user SMTP non vide
+      ET mot de passe SMTP non vide).
+
+  static void logMailDiagnostics()
+      Affiche le mode (Resend vs SMTP), chemin fichier user, utilisateur SMTP,
+      longueur du mot de passe (sans le révéler).
+
+  static boolean isSmtpConfigured() @Deprecated
+      Délègue à isMailConfigured().
+
+  static void sendPlain(String to, String subject, String body)
+      Si non configuré : println console. Sinon Resend (POST JSON api.resend.com)
+      ou SMTP (Session + Authenticator + Transport.send). escJson pour le JSON.
+
+  static void sendEmailVerification / sendPasswordResetCode / sendProfileSecurityCode
+      Corps français prédéfini + code ; délèguent à sendPlain.
+
+  Méthodes private : getResendApiKey, smtpPassword, smtpUser, effectiveMailFrom,
+  effectiveMailFromResend, sendViaResend, sendViaSmtp, fallbackConsole, escJson.
+
+--- services.EmailVerificationService ---
+Rôle : codes à 6 chiffres ; TTL 15 min ; stockage ConcurrentHashMap<Integer, Pending>.
+
+  static void scheduleInitialVerificationEmail(int userId)
+      Thread daemon « chrionline-email-verify » qui appelle sendCodeForUser.
+
+  private static void sendCodeForUser(int userId) throws Exception
+      findById ; si null ou déjà vérifié → return ; sinon issueCode.
+
+  private static void issueCode(User u)
+      code = format %06d sur nextInt(1_000_000) ; put userId → Pending(code, now+TTL) ;
+      MailService.sendEmailVerification.
+
+  static Message send(Message request) — type EMAIL_VERIFY_SEND
+      JSON userId ; si déjà vérifié → SUCCESS avec alreadyVerified ; sinon issueCode.
+
+  static Message confirm(Message request) — type EMAIL_VERIFY_CONFIRM
+      userId + code ; vérifie Pending et TTL ; updateEmailVerified true ; remove.
+
+  static void clearPendingForUser(int userId)
+      Suppression entrée (suppression compte).
+
+--- services.PasswordResetService ---
+Rôle : FORGOT_PASSWORD / RESET_PASSWORD ; PENDING par clé e: ou p:<int canonique>.
+
+  static Message forgotPassword(Message request)
+      email OU phone dans le JSON. E-mail : findByEmail ; EMAIL_NOT_VERIFIED si
+      compte trouvé mais non vérifié ; envoi code + maskedEmail. Téléphone :
+      normalisation PhoneNumberLookup ; clé p:<int> ; code loggé console ;
+      maskedPhone. Toujours SUCCESS avec payload {} ou masques (même si user null
+      pour téléphone — pas d’erreur pour ne pas énumérer les comptes).
+
+  static Message resetPassword(Message request)
+      code, newPassword (≥4), email ou phone ; retrouve Pending ; updatePassword
+      avec PasswordHasher.hash ; remove clé.
+
+  static void clearPendingForUser(int userId)
+      removeIf sur les entrées dont pending.userId == userId.
+
+  private static String keyEmail / keyPhoneDigits / buildForgotPayload / esc
+
+--- services.ProfileSecurityService ---
+Rôle : OTP profil (PROFILE_OTP_SEND) ; map userId → Pending ; TTL 15 min.
+
+  static Message sendOtp(Message request)
+      userId ; utilisateur doit exister et isEmailVerified ; envoi e-mail.
+
+  static boolean verifyAndConsumeProfileOtp(int userId, String code)
+      Compare code et TTL ; si OK remove et true ; sinon false (expiré → remove).
+
+  static void clearPendingOtpForUser(int userId)
+
+--- services.ProfileService ---
+Rôle : UPDATE_PROFILE : mot de passe actuel obligatoire ; changements sensibles
+       (mot de passe, e-mail, téléphone) exigent e-mail vérifié + OTP consommé.
+
+  static Message updateProfile(Message request)
+      userId, currentPassword ; newPassword, newEmail, newPhone, securityOtp optionnels.
+      Vérifie PasswordHasher.verify ; calcule wantsPw / wantsEmail / wantsPhone
+      (téléphone via PhoneNumberLookup) ; si sensitive : EMAIL_NOT_VERIFIED ou
+      BAD_OR_MISSING_OTP. Unicité email/téléphone ; updates ; retour JSON profil.
+
+--- services.AccountDeletionService ---
+Rôle : DELETE_ACCOUNT ; transaction + nettoyage maps en mémoire.
+
+  static Message deleteAccount(Message request)
+      userId, currentPassword ; si e-mail vérifié : securityOtp obligatoire et
+      verifyAndConsumeProfileOtp. setAutoCommit(false) ; AccountDeletionDAO.
+      deleteAllForUser ; commit ; puis clearPending* sur les trois services.
+
+--------------------------------------------------------------------------------
+E. Persistance (persistence)
+--------------------------------------------------------------------------------
+
+--- persistence.AccountDeletionDAO ---
+Rôle : ordre de suppression respectant les clés étrangères.
+
+  static void deleteAllForUser(Connection conn, int userId) throws SQLException
+      Ordre : historique_paiement (optionnel), lignes commande (JOIN orders),
+      orders, methode_paiement_enregistree (optionnel), user. Si DELETE user
+      affecte 0 ligne → SQLException.
+
+  private static void deleteOrderLinesForUser(Connection, int)
+      DELETE ol FROM order_lines ol INNER JOIN orders o … WHERE o.user_id = ?
+
+  private static void deleteOptionalTable(Connection, String sql, int userId)
+      Exécute le DELETE ; si erreur MySQL 1146 (table absente), ignore.
+
+--------------------------------------------------------------------------------
+F. Jetons de session (serveur)
+--------------------------------------------------------------------------------
+
+--- server.SessionRegistry ---
+Rôle : après LOGIN / REGISTER, le serveur émet un jeton opaque (UUID) stocké en
+      mémoire ; le client renvoie ce jeton pour les opérations protégées et pour
+      LOGOUT.
+
+  public static String issueToken(int userId)
+      Crée une entrée token → userId ; utilisé dans le JSON de réponse auth.
+
+  public static Integer resolveUser(String token)
+      Retourne l’utilisateur associé au jeton ou null si inconnu.
+
+  public static void revoke(String token)
+      Supprime le jeton (déconnexion).
+
+--------------------------------------------------------------------------------
+G. Routage serveur
+--------------------------------------------------------------------------------
+
+--- server.RequestRouter ---
+Rôle : dispatch par message.getType() (trim + upper case).
+
+  static Message route(Message message)
+      null → ERROR NULL_MESSAGE ; type vide → EMPTY_TYPE.
+      Personne 1 (auth / profil) : PING (verifyConnection), LOGIN → AuthService.login,
+      REGISTER → AuthService.register, LOGOUT → SessionRegistry.revoke (payload avec
+      sessionToken), FORGOT_PASSWORD, RESET_PASSWORD, EMAIL_VERIFY_*, PROFILE_OTP_SEND,
+      UPDATE_PROFILE, DELETE_ACCOUNT.
+      Session / commandes : GET_COMMANDES — exige sessionToken dans le payload ;
+      SessionRegistry.resolveUser puis CommandeService.getCommandesByUser (sécurisation
+      par jeton, pas seulement par userId client).
+      (Autres types : produits, catalogue, paiement, etc.)
+
+--------------------------------------------------------------------------------
+H. Client JavaFX et UI
+--------------------------------------------------------------------------------
+
+--- ui.SocketApiClient ---
+Rôle : envoi TCP des Message et parseurs légers sur les réponses JSON texte.
+
+  Message send(Message request) throws IOException
+      Une requête/réponse JSON par aller-retour.
+
+  Integer parseAuthUserId(String json) / String parseAuthUsername / parseAuthEmail /
+  String parseAuthPhone / Boolean parseAuthEmailVerified
+      Extraction après LOGIN / REGISTER / profil.
+
+  String parseAuthSessionToken(String json)
+      Lit le jeton de session renvoyé par le serveur.
+
+  String parseAuthRole(String json)
+      Lit le rôle (CLIENT, vendeur, admin, …) pour l’UI et la navigation.
+
+  String extractJsonStringValue(String json, String key)
+      Lecture d’une clé dans un petit objet JSON.
+
+--- ui.UiMessages ---
+  static String errorCode(String code)
+      Table code serveur → message français (BAD_CREDENTIALS, AUTH_REQUIRED,
+      SESSION_INVALID, EMAIL_NOT_VERIFIED, BAD_OR_MISSING_OTP, NOT_SELLER, …).
+
+  static String genericFailure() / networkFailure()
+      Messages génériques.
+
+--- ui.ChriOnlineClientApp (gestion utilisateurs / session) ---
+Rôle : application JavaFX ; connexion **depuis la barre latérale** (champs e-mail /
+      mot de passe), persistance locale, rôle, pages Compte et Profil.
+
+  void start(Stage stage)
+      Scène, chargement ClientConfigLoader, restorePersistedSession().
+
+  void rebuildApiFromFields()
+      Reconstruit l’URL serveur et l’instance SocketApiClient (hôte/port).
+
+  void refreshSessionBanner()
+      Bannière d’état serveur / compte.
+
+  void submitSidebarLogin()
+      Construit LOGIN, send(), applySession en cas de succès (chemin principal de
+      connexion — pas de dialogue modal « login » obligatoire).
+
+  void openRegisterDialog()
+      Inscription modale ; REGISTER ; initOwner(primaryStage).
+
+  void openForgotPasswordDialog()
+      FORGOT_PASSWORD / RESET_PASSWORD.
+
+  void applySession(String jsonPayload)
+      Parse userId, token, rôle, profil ; setAccountLoggedInUi(true) ; persistSession ;
+      updateSessionRoleNav.
+
+  void persistSession() / void clearPersistedSession()
+      Clés ClientPrefs : sessionToken, userId, role, username, email, phone,
+      emailVerified (nœud défini dans l’app).
+
+  void restorePersistedSession()
+      Au démarrage : affichage connecté sans mot de passe si prefs valides.
+
+  void logoutAccount()
+      Message LOGOUT avec jeton ; clearPersistedSession ; UI déconnectée.
+
+  void setAccountLoggedInUi(boolean loggedIn)
+      Bascule formulaire de connexion / bloc compte connecté dans la sidebar.
+
+  void updateSessionRoleNav()
+      Navigation selon le rôle (client / vendeur / admin).
+
+  void sendAccountEmailVerification / void confirmAccountEmailVerification
+      Vérification e-mail (page Compte).
+
+  void sendProfileSecurityOtp / void submitProfileUpdateFromPage (ou équivalent)
+      OTP et UPDATE_PROFILE.
+
+  void confirmAndDeleteAccount()
+      DELETE_ACCOUNT avec confirmations.
+
+  void showAccountPage() / void showProfilePage() / construction sidebar (buildSidebar, …)
+      Navigation et écrans liés au compte.
+
+--- common.ClientPrefs (rappel session client) ---
+  Les méthodes getString / putString / putInt / putBoolean / remove sur un nœud
+  dédié permettent de persister le jeton et le profil entre deux lancements du client.
+
+--------------------------------------------------------------------------------
+I. Récapitulatif des messages Personne 1 (type → rôle)
+--------------------------------------------------------------------------------
+  PING               → BaseDonnees.verifyConnection
+  LOGIN              → AuthService.login (+ SessionRegistry.issueToken, role dans JSON)
+  REGISTER           → AuthService.register (+ issueToken, role)
+  LOGOUT             → SessionRegistry.revoke
+  GET_COMMANDES      → SessionRegistry.resolveUser + CommandeService (liste commandes utilisateur authentifié par jeton)
+  FORGOT_PASSWORD    → PasswordResetService.forgotPassword
+  RESET_PASSWORD     → PasswordResetService.resetPassword
+  EMAIL_VERIFY_SEND  → EmailVerificationService.send
+  EMAIL_VERIFY_CONFIRM → EmailVerificationService.confirm
+  PROFILE_OTP_SEND   → ProfileSecurityService.sendOtp
+  UPDATE_PROFILE     → ProfileService.updateProfile
+  DELETE_ACCOUNT     → AccountDeletionService.deleteAccount
+
+Fin du document — Personne 1 (version alignée sur le code : jetons de session,
+connexion sidebar, parseAuthRole / parseAuthSessionToken, GET_COMMANDES sécurisé).
+Pour le fichier source BCrypt vendu (org.mindrot.jbcrypt.BCrypt), se référer à la
+documentation jBCrypt / OpenBSD bcrypt ; l’application n’expose que PasswordHasher publiquement.

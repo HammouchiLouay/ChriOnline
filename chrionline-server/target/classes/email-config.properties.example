@@ -1,0 +1,17 @@
+# Copy to %USERPROFILE%\.chrionline\email-config.properties (Windows) or ~/.chrionline/email-config.properties
+# OR set the same keys via CHRIONLINE_* environment variables — see README.
+
+# Easiest: Resend API key (no SMTP)
+resend.api.key=
+mail.from=onboarding@resend.dev
+
+# Alternative: Gmail SMTP (app password)
+mail.smtp.host=smtp.gmail.com
+mail.smtp.port=587
+mail.smtp.auth=true
+mail.smtp.starttls.enable=true
+mail.smtp.starttls.required=true
+mail.smtp.ssl.trust=smtp.gmail.com
+mail.smtp.user=louayhamouchi2@gmail.com
+mail.smtp.password=jxtruuuogyhhexpu
+mail.from=ChriOnline

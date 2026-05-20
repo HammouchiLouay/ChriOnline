@@ -1,0 +1,21 @@
+ChriOnline — Personne 3 reference (English)
+Scope: shopping cart in the JavaFX client only. No MySQL `cart` table; state is `Map<String, Integer> cart` in ui.ChriOnlineClientApp (product id → quantity). Converts cart to `id:qty;…` string for CREATE_COMMANDE (Person 4 persists orders).
+
+Job title: responsible for cart UX and purchase flow (JavaFX client) (Person 3).
+
+ui.ChriOnlineClientApp (cart-related)
+cart — LinkedHashMap preserving insertion order for display.
+addProductDetailToCart — reads quantity from product detail view; increments cart; updateCartSummary.
+updateCartSummary — empty cart shows “Vide”; else walks cart, findProduct for price/name, updates label and dashboard.
+findProduct(String id) — resolves Product from productById or loaded catalog list.
+buildProduitsPayload — builds `id:qty;id:qty` for CREATE_COMMANDE.
+createCommandeFromCart — sends CREATE_COMMANDE with userId + produits; on success clears cart and refreshes UI.
+Grid “add” handlers — increment cart.put, updateCartSummary.
+After account deletion client flow — cart.clear().
+
+Network
+Uses common.Message + JsonUtil + SocketApiClient.send; server-side order creation is not “cart storage” — definitive line amounts are fixed on the server from the catalog at command creation.
+
+Database impact: none for cart state (see Personne3-database-impact.txt).
+
+Detailed French spec: docs/equipe/PERSONNE-03-PANIER.md.

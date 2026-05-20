@@ -1,0 +1,25 @@
+ChriOnline — Personne 4 reference (English)
+Scope: order persistence in MySQL (`orders`, `order_lines`); create from cart string or simplified total; validate, cancel, list by user; status updates used by payment flow. Enriches lines from ProductRepository at creation time.
+
+Job title: responsible for orders, statuses, and persistence (server & DB) (Person 4).
+
+models.LigneCommande
+Serializable line: product id, name, quantity, unit price; calculerSousTotal, toJson.
+
+models.Commande
+Aggregate: id, userId, lines, status, timestamp; ajouterLigne, calculerTotal, toJson; statuses e.g. EN_ATTENTE, VALIDE, ANNULEE, PAYEE.
+
+persistence.CommandeDAO
+insert (transaction: orders + order_lines), findById, findByUserId, updateStatus, valider, annuler; private helpers for mapping and line loads.
+
+services.CommandeService
+createCommande(userId, total) — simplified single line.
+createCommandeAvecProduits(userId, produitsData) — parses id:qty;…, loads Product via ProductRepository, inserts via DAO.
+validerCommande, annulerCommande, getCommandesByUser, getCommandeById, updateCommandeStatus.
+
+RequestRouter
+CREATE_COMMANDE, VALIDER_COMMANDE, ANNULER_COMMANDE, GET_COMMANDES (session-bound user for listing per current implementation).
+
+Database impact: see Personne4-database-impact.txt (`orders`, `order_lines`; reads `products`).
+
+Detailed French spec: docs/equipe/PERSONNE-04-COMMANDES.md.

@@ -1,0 +1,76 @@
+================================================================================
+ChriOnline — Personne 3 : documentation finale (classes et méthodes)
+================================================================================
+Périmètre : panier d’achat côté **client JavaFX uniquement** ; pas de table SQL
+« panier » ; conversion du panier en charge pour CREATE_COMMANDE. Les produits
+affichés proviennent des réponses serveur (Personne 2) déjà chargées en mémoire.
+
+Titre du poste : responsable du panier d’achat et de l’expérience d’achat
+(client JavaFX) — Personne 3.
+
+Table des matières
+  A. État panier dans ChriOnlineClientApp
+  B. Méthodes « service panier » (même classe)
+  C. Lien réseau vers les commandes
+  D. Dépendances (common.*, ui.SocketApiClient)
+
+--------------------------------------------------------------------------------
+A. État panier dans ui.ChriOnlineClientApp
+--------------------------------------------------------------------------------
+
+Champ :
+  cart — Map<String, Integer> (LinkedHashMap), clé = id produit (String),
+         valeur = quantité. Ordre d’insertion conservé pour l’affichage.
+
+Composants UI liés (indicatif) :
+  cartSummaryLabel — résumé texte (articles, total USD).
+  Carte panier dans le tableau de bord : bouton commande → createCommandeFromCart.
+
+--------------------------------------------------------------------------------
+B. Méthodes « service panier » (ui.ChriOnlineClientApp)
+--------------------------------------------------------------------------------
+
+  addProductDetailToCart() — lit la quantité sur la fiche produit ; incrémente
+      cart pour currentDetailProduct.getId() ; updateCartSummary().
+  updateCartSummary() — si panier vide → « Vide » ; sinon parcourt cart,
+      findProduct(id) pour prix/nom, total USD et libellé ; met à jour le label
+      et le tableau de bord (updateDashboardStats).
+  findProduct(String id) — résout un Product depuis productById ou la liste catalog.
+  buildProduitsPayload() — chaîne id:qty;id:qty pour CREATE_COMMANDE.
+  createCommandeFromCart() — envoie CREATE_COMMANDE avec userId + produits ;
+      en succès : cart.clear(), updateCartSummary(), rafraîchissement UI.
+
+Ajout depuis la grille (createProductCard) :
+  incrément cart.put(p.getId(), ...) puis updateCartSummary().
+
+Après suppression de compte (côté client) : cart.clear() dans le flux session.
+
+currentCartTotal() / dashboard — agrégation pour affichage total panier.
+
+--------------------------------------------------------------------------------
+C. Lien réseau vers les commandes
+--------------------------------------------------------------------------------
+
+Le serveur ne reçoit pas un objet Panier : payload JSON du type
+  {"userId":"…","produits":"83:2;84:1"}
+via SocketApiClient (Message.request CREATE_COMMANDE).
+
+Le montant définitif des lignes est figé **côté serveur** (Personne 4) à partir
+du catalogue au moment de la création.
+
+--------------------------------------------------------------------------------
+D. Dépendances (common.*, ui.*)
+--------------------------------------------------------------------------------
+
+  common.Message — enveloppe des requêtes.
+  common.JsonUtil — construction / lecture des payloads JSON.
+  ui.SocketApiClient — send(Message) pour CREATE_COMMANDE.
+
+  product.Product — DTO affiché pour prix et libellés (pas de JDBC dans le panier).
+
+--------------------------------------------------------------------------------
+Récapitulatif
+--------------------------------------------------------------------------------
+
+Aucune classe serveur nommée Panier / PanierService : tout est regroupé dans
+ChriOnlineClientApp. Pour le détail : docs/equipe/PERSONNE-03-PANIER.md.

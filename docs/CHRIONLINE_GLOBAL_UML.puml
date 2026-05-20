@@ -1,0 +1,684 @@
+@startuml ChriOnline_Global_UML
+
+allowmixing
+
+skinparam packageStyle rectangle
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam linetype ortho
+
+title ChriOnline - Global Project UML
+
+package "Client JavaFX / UI" {
+  class ChriOnlineClientApp {
+    +start(Stage)
+    +main(String[])
+    -connectToServer()
+    -submitSidebarLogin()
+    -openRegisterDialog()
+    -addProductDetailToCart()
+    -createCommandeFromCart()
+    -openAdminRsaLoginDialog()
+  }
+
+  class SocketApiClient {
+    -host: String
+    -port: int
+    -sessionAesKey: SecretKey
+    +send(Message): Message
+    +isApplicationCryptoEnabled(): boolean
+    +isApplicationCryptoSessionActive(): boolean
+    -performHandshakeLocked()
+    -ensureConnectedLocked()
+  }
+
+  class UiMessages {
+    +errorCode(String): String
+    +genericFailure(): String
+    +networkFailure(): String
+  }
+
+  class ProductImageLoader {
+    +loadAsync(...)
+  }
+
+  class LanDiscoveryClient {
+    +discover(int)
+    +discoverWithRetries(...)
+  }
+
+  class BrandIconUtil {
+    +createFxImage(int)
+    +createFxImageTitleTab(int)
+    +createFxImageForStage(int)
+  }
+
+  class StageResizeBehavior {
+    +install(Stage, Scene)
+  }
+}
+
+package "Server Socket" {
+  class ServerMain {
+    +main(String[])
+  }
+
+  class ClientHandler {
+    -socket: Socket
+    +run()
+    -runNegotiatedProtocol(...)
+    -logRouterError(...)
+  }
+
+  class RequestRouter {
+    +route(Message): Message
+  }
+
+  class SessionRegistry {
+    +issueToken(int): String
+    +resolveUser(String): Integer
+    +revoke(String)
+  }
+
+  class LanDiscoveryProtocol {
+    +encode(String, int): byte[]
+    +parse(byte[], int): Optional
+  }
+
+  class NetworkInfo {
+    +localIPv4Addresses(): List
+    +isLikelyReachableFromOtherMachines(String): boolean
+    +isNotRoutableFromOtherNetworks(String): boolean
+  }
+
+  class PublicIpHint {
+    +fetchPublicIpv4(): Optional
+  }
+}
+
+package "Common Protocol / Config" {
+  class Message {
+    -type: String
+    -requestId: String
+    -status: String
+    -payload: String
+    -errorCode: String
+    +request(String, String, String): Message
+  }
+
+  class JsonUtil {
+    +toJson(Message): String
+    +fromJson(String): Message
+    +toMap(String): Map
+    +toBinary(Object): byte[]
+    +fromBinary(byte[], Class): Object
+  }
+
+  class ClientConfigLoader {
+    +load(): Properties
+    +userClientConfigPath(): Path
+    +isAllowLoopback(Properties): boolean
+  }
+
+  class ClientPrefs {
+    +getString(...): String
+    +getInt(...): int
+    +getBoolean(...): boolean
+    +putString(...)
+    +putInt(...)
+    +putBoolean(...)
+  }
+
+  class PasswordHasher {
+    +hash(String): String
+    +verify(String, String): boolean
+    +needsRehash(String): boolean
+  }
+
+  class MaskingUtil {
+    +maskEmail(String): String
+    +maskPhoneDigits(String): String
+  }
+
+  class TextUiNormalizer {
+    +normalizeFrenchUi(String): String
+    +categoryMatchVariants(String): List
+  }
+
+  class ChrionlineLog {
+    +info(String)
+    +warn(String)
+    +err(String)
+    +err(String, Throwable)
+  }
+}
+
+package "Security RSA / AES / TLS" {
+  class AesGcmLineCipher {
+    +encryptLine(String, SecretKey): String
+    +decryptLine(String, SecretKey): String
+  }
+
+  class RsaOaepAesKeyWrap {
+    +wrapAesKey(PublicKey, SecretKey): byte[]
+    +unwrapAesKey(PrivateKey, byte[]): SecretKey
+  }
+
+  class ApplicationSessionRsaKeys {
+    +warmup(Properties)
+    +ensureLoaded(Properties): KeyPair
+    +publicKey(Properties): PublicKey
+    +privateKey(Properties): PrivateKey
+  }
+
+  class RsaSignatureUtil {
+    +signChallenge(String, PrivateKey): byte[]
+    +verifyChallenge(String, byte[], PublicKey): boolean
+  }
+
+  class ChallengeGenerator {
+    +generateChallenge(): String
+  }
+
+  class PemKeyUtil {
+    +parsePkcs8PrivateKeyPem(String): PrivateKey
+    +parseX509PublicKeyPem(String): PublicKey
+  }
+
+  class RsaKeyPairGenerator {
+    +generateKeyPair(): KeyPair
+    +toPublicKeyPem(KeyPair): String
+    +toPrivateKeyPem(KeyPair): String
+  }
+
+  class GenerateAdminRsaKeys {
+    +main(String[])
+  }
+
+  class SslConfigLoader {
+    +load(): Properties
+    +userConfigFilePath(): Path
+  }
+
+  class SslContextUtil {
+    +isServerTlsEnabled(Properties): boolean
+    +isClientTlsEnabled(Properties): boolean
+    +buildServerContext(Properties): SSLContext
+    +buildClientContext(Properties): SSLContext
+  }
+}
+
+package "Personne 1 - Users / Auth" {
+  class User {
+    -id_user: Integer
+    -username: String
+    -hash_password: String
+    -email: String
+    -phone_number: Integer
+    -role: String
+    -emailVerified: boolean
+    -adminPublicKeyPem: String
+  }
+
+  class UserDAO {
+    +createUser(User)
+    +findById(int): User
+    +findByEmail(String): User
+    +findByPhoneNumber(Integer): User
+    +emailExists(String): boolean
+    +phoneNumberExists(Integer): boolean
+    +updateUsername(...)
+    +updatePassword(...)
+    +updateEmail(...)
+    +updatePhoneNumber(...)
+    +deleteUser(Integer)
+    +updateEmailVerified(int, boolean)
+  }
+
+  class Authentification {
+    +register(User): boolean
+    +loginByEmailOrPhone(String, String): User
+  }
+
+  class BaseDonnees {
+    +jdbcUrl(): String
+    +dbUser(): String
+    +getConnection(): Connection
+    +verifyConnection()
+    +currentDatabaseName(): String
+    +describeProductsTable(): String
+  }
+
+  class PhoneNumberLookup {
+    +digitsOnly(String): String
+    +parseStoredPhoneInt(String): Integer
+  }
+
+  class AuthService {
+    +login(Message): Message
+    +register(Message): Message
+  }
+
+  class AdminAuthService {
+    +requestChallenge(Message): Message
+    +verifyChallenge(Message): Message
+    +cleanupExpired()
+  }
+
+  class EmailVerificationService {
+    +scheduleInitialVerificationEmail(int)
+    +send(Message): Message
+    +confirm(Message): Message
+    +clearPendingForUser(int)
+  }
+
+  class PasswordResetService {
+    +forgotPassword(Message): Message
+    +resetPassword(Message): Message
+    +clearPendingForUser(int)
+  }
+
+  class ProfileService {
+    +updateProfile(Message): Message
+  }
+
+  class ProfileSecurityService {
+    +sendOtp(Message): Message
+    +verifyAndConsumeProfileOtp(int, String): boolean
+    +clearPendingOtpForUser(int)
+  }
+
+  class AccountDeletionService {
+    +deleteAccount(Message): Message
+  }
+
+  class AccountDeletionDAO {
+    +deleteAllForUser(Connection, int)
+  }
+}
+
+package "Personne 2 - Catalogue / Products" {
+  class Product {
+    -id: String
+    -name: String
+    -description: String
+    -price: double
+    -stock: int
+    -imageUrl: String
+    -category: String
+    -brand: String
+    -rating: double
+  }
+
+  class ProductCatalogDAO {
+    +loadAll(): List
+    +loadByCategory(String): List
+    +loadPage(int, int): List
+    +loadPageByCategory(String, int, int): List
+    +findByProductId(int): Product
+    +distinctCategoriesApproved(): List
+    +insertPendingListing(...): int
+    +listPending(): List
+    +listBySellerId(int): List
+    +approve(int, int): boolean
+    +reject(int, int, String): boolean
+    +updateStock(int, int): boolean
+    +insertAdminDirectApproved(...): int
+    +deleteProductById(int): boolean
+    +listAllForAdmin(String): List
+    +distinctCategoriesForAdmin(): List
+    +isKnownAdminCategory(String): boolean
+  }
+
+  class ProductRepository {
+    +getAll(): List
+    +getByCategory(String): List
+    +getPage(String, int, int): List
+    +findById(String): Optional
+    +distinctCategories(): Set
+    +updateStock(String, int): boolean
+  }
+
+  class ProductService {
+    +list(Message): Message
+    +details(Message): Message
+    +updateStock(Message): Message
+    +categories(Message): Message
+  }
+
+  class ProductListingService {
+    +submit(Message): Message
+    +listPending(Message): Message
+    +listMine(Message): Message
+    +approve(Message): Message
+    +reject(Message): Message
+  }
+
+  class AdminProductService {
+    +list(Message): Message
+    +categories(Message): Message
+    +create(Message): Message
+    +updateStock(Message): Message
+    +delete(Message): Message
+  }
+
+  record ProductListingInfo
+  record AdminProductRow
+}
+
+package "Personne 3 - Panier Client" {
+  class CartState {
+    cart: Map<ProductId, Quantity>
+    productById: Map<ProductId, Product>
+    currentDetailProduct: Product
+  }
+
+  class CartActions {
+    +addProductDetailToCart()
+    +updateCartSummary()
+    +findProduct(String): Product
+    +buildProduitsPayload(): String
+    +createCommandeFromCart()
+    +currentCartTotal(): double
+  }
+}
+
+package "Personne 4 - Commandes" {
+  class Commande {
+    -id: int
+    -userId: int
+    -lignes: List<LigneCommande>
+    -status: String
+    -dateCommandeMs: long
+    +ajouterLigne(LigneCommande)
+    +supprimerLigne(int)
+    +calculerTotal(): double
+    +toJson(): String
+  }
+
+  class LigneCommande {
+    -produitId: int
+    -nom: String
+    -quantite: int
+    -prixUnitaire: double
+    +calculerSousTotal(): double
+    +toJson(): String
+  }
+
+  class CommandeDAO {
+    +insert(Connection, Commande): int
+    +findById(int): Commande
+    +findById(Connection, int): Commande
+    +findByUserId(int): List
+    +updateStatus(int, String): boolean
+    +valider(int): boolean
+    +annuler(int): boolean
+  }
+
+  class CommandeService {
+    +createCommande(int, double): Commande
+    +createCommandeAvecProduits(int, String): Commande
+    +validerCommande(int): boolean
+    +annulerCommande(int): boolean
+    +getCommandesByUser(int): List
+    +getCommandeById(int): Commande
+    +updateCommandeStatus(int, String)
+  }
+}
+
+package "Personne 5 - Payment Module" {
+  package "ecommerce.personne5.model" {
+    class Paiement {
+      -idPaiement: String
+      -montantInitial: double
+      -fraisLivraison: double
+      -reductionCoupon: double
+      -montantFinal: double
+      -statut: StatutPaiement
+      -typePaiement: TypePaiement
+      -idCommande: String
+      -scoreFraude: int
+      +traiterPaiement()
+    }
+
+    class EcoCommande {
+      -idCommande: String
+      -dateCommande: String
+      -statut: StatutCommande
+      -total: double
+    }
+
+    class Coupon {
+      -code: String
+      -reductionPourcentage: double
+      -actif: boolean
+    }
+
+    class Wallet {
+      -solde: double
+      +recharger(double)
+      +payer(double): boolean
+    }
+
+    class PaiementStats {
+      +incrementerTotalPaiements()
+      +incrementerPaiementsAcceptes()
+      +incrementerPaiementsRefuses()
+      +ajouterChiffreAffaires(double)
+    }
+
+    class AuditLog
+
+    enum TypePaiement
+    enum StatutPaiement
+    enum StatutCommande
+  }
+
+  package "ecommerce.personne5.service" {
+    class PaiementService {
+      +verifierCoupon(String): Coupon
+      +calculerFraisLivraison(double): double
+      +calculerMontantParTranche(Paiement, int): double
+      +simulerPaiement(EcoCommande, TypePaiement, Coupon, Wallet): Paiement
+      +confirmerPaiement(Paiement, EcoCommande)
+      +rembourserPaiement(Paiement, EcoCommande): boolean
+    }
+
+    class AuditService
+    class CashbackService
+    class CurrencyService
+    class FlashSaleService
+    class FraudDetectionService
+    class LoyaltyService
+    class PaiementQueueService
+    class PaymentAnalyticsService
+    class PaymentRecommendationService
+    class PaymentTimeoutService
+    class PromotionService
+    class RetryPaymentService
+    class RiskAnalysisService
+    class WalletService
+  }
+
+  package "ecommerce.personne5.utils" {
+    class IdGeneratorUtil
+    class LoggerUtil
+    class NotificationUtil
+    class PaiementSecurityUtil
+    class PaiementValidator
+    class RecuGenerator
+    class TokenUtil
+  }
+
+  class SocketPaymentService {
+    +simulatePayment(Message): Message
+  }
+
+  class PaymentHistoryDAO {
+    +insert(...)
+  }
+
+  class SavedPaymentMethodDAO {
+    +insert(...)
+    +listByUser(int): List
+    +deleteForUser(int, int): boolean
+    +toJsonArray(List): String
+  }
+
+  class SavedPaymentService {
+    +list(Message): Message
+    +delete(Message): Message
+  }
+
+  class StorageCryptoService {
+    +reloadConfig()
+    +sealIfEnabled(String): String
+    +openIfNeeded(String): String
+  }
+}
+
+database "MySQL / XAMPP\nchrionline" as DB {
+  entity "user"
+  entity "products"
+  entity "orders"
+  entity "order_lines"
+  entity "historique_paiement"
+  entity "methode_paiement_enregistree"
+}
+
+cloud "SMTP Gmail / Mail Service" as SMTP
+
+class MailConfigLoader {
+  +load(): Properties
+  +userConfigFilePath(): Path
+}
+
+class MailService {
+  +reload()
+  +isMailConfigured(): boolean
+  +sendPlain(String, String, String)
+  +sendEmailVerification(String, String)
+  +sendPasswordResetCode(String, String)
+  +sendProfileSecurityCode(String, String)
+}
+
+ChriOnlineClientApp --> SocketApiClient
+ChriOnlineClientApp --> UiMessages
+ChriOnlineClientApp --> ProductImageLoader
+ChriOnlineClientApp --> Product
+ChriOnlineClientApp --> CartState
+ChriOnlineClientApp --> CartActions
+ChriOnlineClientApp --> Message
+
+SocketApiClient --> Message
+SocketApiClient --> JsonUtil
+SocketApiClient --> AesGcmLineCipher
+SocketApiClient --> RsaOaepAesKeyWrap
+SocketApiClient --> SslConfigLoader
+SocketApiClient --> SslContextUtil
+
+ServerMain --> ClientHandler
+ServerMain --> BaseDonnees
+ServerMain --> MailService
+ServerMain --> ApplicationSessionRsaKeys
+ServerMain --> SslConfigLoader
+
+ClientHandler --> RequestRouter
+ClientHandler --> Message
+ClientHandler --> JsonUtil
+ClientHandler --> AesGcmLineCipher
+ClientHandler --> RsaOaepAesKeyWrap
+ClientHandler --> ApplicationSessionRsaKeys
+
+RequestRouter --> AuthService
+RequestRouter --> AdminAuthService
+RequestRouter --> ProductService
+RequestRouter --> ProductListingService
+RequestRouter --> AdminProductService
+RequestRouter --> CommandeService
+RequestRouter --> SocketPaymentService
+RequestRouter --> SavedPaymentService
+RequestRouter --> ProfileService
+RequestRouter --> EmailVerificationService
+RequestRouter --> PasswordResetService
+RequestRouter --> AccountDeletionService
+
+AuthService --> Authentification
+AuthService --> UserDAO
+AuthService --> BaseDonnees
+AuthService --> PasswordHasher
+AuthService --> SessionRegistry
+Authentification --> UserDAO
+UserDAO --> User
+UserDAO --> DB
+BaseDonnees --> DB
+
+AdminAuthService --> ChallengeGenerator
+AdminAuthService --> RsaSignatureUtil
+AdminAuthService --> PemKeyUtil
+AdminAuthService --> UserDAO
+AdminAuthService --> SessionRegistry
+
+EmailVerificationService --> MailService
+PasswordResetService --> MailService
+ProfileSecurityService --> MailService
+MailService --> MailConfigLoader
+MailService --> SMTP
+AccountDeletionService --> AccountDeletionDAO
+AccountDeletionDAO --> DB
+
+ProductService --> ProductRepository
+ProductRepository --> ProductCatalogDAO
+ProductRepository --> Product
+ProductCatalogDAO --> Product
+ProductCatalogDAO --> ProductListingInfo
+ProductCatalogDAO --> AdminProductRow
+ProductCatalogDAO --> TextUiNormalizer
+ProductCatalogDAO --> DB
+
+ProductListingService --> ProductCatalogDAO
+ProductListingService --> SessionRegistry
+ProductListingService --> UserDAO
+
+AdminProductService --> ProductCatalogDAO
+AdminProductService --> SessionRegistry
+
+CartActions --> Product
+CartActions --> SocketApiClient
+CartActions --> Message
+CartActions --> CommandeService
+
+CommandeService --> CommandeDAO
+CommandeService --> Commande
+CommandeService --> LigneCommande
+CommandeService --> ProductRepository
+CommandeDAO --> DB
+Commande "1" *-- "many" LigneCommande
+
+SocketPaymentService --> CommandeService
+SocketPaymentService --> PaiementService
+SocketPaymentService --> PaymentHistoryDAO
+SocketPaymentService --> SavedPaymentMethodDAO
+SocketPaymentService --> StorageCryptoService
+
+PaiementService --> Paiement
+PaiementService --> EcoCommande
+PaiementService --> Coupon
+PaiementService --> Wallet
+PaiementService --> PaiementStats
+PaiementService --> AuditService
+PaiementService --> FraudDetectionService
+PaiementService --> PromotionService
+PaiementService --> WalletService
+PaiementService --> PaiementQueueService
+
+PaymentHistoryDAO --> DB
+SavedPaymentMethodDAO --> DB
+SavedPaymentService --> SavedPaymentMethodDAO
+
+ApplicationSessionRsaKeys --> SslConfigLoader
+RsaOaepAesKeyWrap --> ApplicationSessionRsaKeys
+AesGcmLineCipher --> SocketApiClient
+AesGcmLineCipher --> ClientHandler
+
+@enduml

@@ -1,0 +1,94 @@
+================================================================================
+ChriOnline — Personne 5 : documentation finale (classes et méthodes)
+================================================================================
+Périmètre : simulation de paiement (module ecommerce.personne5), pont socket
+SIMULATE_PAYMENT, mise à jour du statut de commande ChriOnline en base,
+historique SQL (`historique_paiement`), moyens enregistrés masqués
+(`methode_paiement_enregistree`).
+
+Titre du poste : responsable paiement simulé, historique et moyens enregistrés
+— Personne 5.
+
+Table des matières
+  A. Deux modèles « Commande »
+  B. Module ecommerce.personne5 (extrait)
+  C. Services ChriOnline (services.*)
+  D. Persistance (persistence.*)
+  E. Récapitulatif des types de messages Personne 5
+
+--------------------------------------------------------------------------------
+A. Deux modèles « Commande »
+--------------------------------------------------------------------------------
+
+  models.Commande (chrionline-server) — id entier, statuts EN_ATTENTE, VALIDE,
+      PAYEE, ANNULEE, etc. ; source de vérité MySQL `orders`.
+
+  ecommerce.personne5.model.Commande — modèle SSI pour la simulation (id String,
+      StatutCommande enum) ; le total est aligné sur serverCmd.calculerTotal().
+
+--------------------------------------------------------------------------------
+B. Module ecommerce.personne5 (extrait)
+--------------------------------------------------------------------------------
+
+--- ecommerce.personne5.model.Paiement ---
+Résultat simulation : montants, statut, type, message, token, score fraude.
+  Constructeur complet, traiterPaiement(), getters/setters utiles, toString().
+
+--- ecommerce.personne5.service.PaiementService ---
+Moteur hors socket : PromotionService, FraudDetectionService, WalletService,
+    PaiementQueueService, AuditService, etc.
+
+  verifierCoupon(code), calculerFraisLivraison(montantApresReduction),
+  calculerMontantParTranche(Paiement, n),
+  simulerPaiement(Commande eco, TypePaiement, Coupon, Wallet),
+  confirmerPaiement(Paiement, Commande eco), rembourserPaiement(...),
+  afficherDetailsPaiement, afficherRecu, afficherHistorique, afficherStats,
+  getStats, getAuditService, getQueueService
+
+--- Autres packages --- model (TypePaiement, StatutPaiement, Wallet, Coupon…),
+    config.BusinessRules, utils.RecuGenerator, main.PaiementApp (démo console).
+
+--------------------------------------------------------------------------------
+C. Services ChriOnline (services.*)
+--------------------------------------------------------------------------------
+
+--- services.SocketPaymentService ---
+  simulatePayment(Message) — SIMULATE_PAYMENT : JSON commandeId, userId,
+      typePaiement, coupon optionnel, saveTemplate + champs template.
+      Charge CommandeService.getCommandeById ; vérifie utilisateur et statut ;
+      appelle PaiementService.simulerPaiement puis confirmerPaiement ;
+      PaymentHistoryDAO.insert ; CommandeDAO.updateStatus (PAYEE / ANNULEE) ;
+      optional SavedPaymentMethodDAO.insert. Verrou synchrone PAY_LOCK.
+
+  Méthodes privées : parseType, parseBool, toJsonPayload, maybeSavePaymentTemplate,
+      escJson, err, etc.
+
+--- services.SavedPaymentService ---
+  list(Message) — LIST_SAVED_PAYMENT_METHODS, payload userId.
+  delete(Message) — DELETE_SAVED_PAYMENT_METHOD, JSON userId + idMethode.
+
+--------------------------------------------------------------------------------
+D. Persistance (persistence.*)
+--------------------------------------------------------------------------------
+
+--- persistence.PaymentHistoryDAO ---
+  insert(commandeId, userId, typePaiement, idPaiementSimule, statut,
+      montantFinal, messageResume)
+
+--- persistence.SavedPaymentMethodDAO ---
+  record SavedRow — id, typePaiement, displayLabel, createdAtIso.
+  insert(userId, typePaiement, displayLabel, templateJson)
+  listByUser(userId), deleteForUser(methodId, userId), toJsonArray(List)
+
+--------------------------------------------------------------------------------
+E. Récapitulatif des types de messages Personne 5
+--------------------------------------------------------------------------------
+
+SIMULATE_PAYMENT — simulation + persistance + mise à jour commande.
+LIST_SAVED_PAYMENT_METHODS — moyens masqués.
+DELETE_SAVED_PAYMENT_METHOD — suppression d’un gabarit.
+
+Codes d’erreur fréquents : EMPTY_PAYLOAD, MISSING_COMMANDE_ID, MISSING_USERID,
+COMMANDE_NOT_FOUND, FORBIDDEN, COMMANDE_NOT_PAYABLE, PAYMENT_FAILED, etc.
+
+Pour le détail : docs/equipe/PERSONNE-05-PAIEMENT.md.

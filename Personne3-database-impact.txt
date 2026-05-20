@@ -1,0 +1,36 @@
+================================================================================
+ChriOnline — Personne 3 : impact base de données MySQL
+================================================================================
+Titre du poste (référence) : responsable du panier d’achat et de l’expérience
+d’achat (client JavaFX) — Personne 3.
+
+--------------------------------------------------------------------------------
+Persistance SQL
+--------------------------------------------------------------------------------
+
+Aucune table MySQL « panier » ou « cart » dans le schéma actuel
+(sql/chrionline_schema_all.sql). Le panier est entièrement en mémoire dans le
+client JavaFX : Map<String, Integer> cart dans ui.ChriOnlineClientApp.
+
+Fermeture de l’application → contenu du panier perdu (sauf évolution future :
+fichier local ou API serveur).
+
+--------------------------------------------------------------------------------
+Lien indirect avec la base
+--------------------------------------------------------------------------------
+
+Le panier ne fait que référencer des identifiants produit (chaînes) qui
+correspondent à des product_id dans la table products. Les noms et prix affichés
+viennent des listes produits déjà chargées côté client (catalogue issu du
+serveur). Aucune requête JDBC n’est exécutée depuis le code panier.
+
+La création de commande (bouton « passer commande ») envoie CREATE_COMMANDE au
+serveur : la persistance SQL (orders / order_lines) est du ressort de la
+Personne 4, pas du stockage du panier lui-même.
+
+--------------------------------------------------------------------------------
+Résumé
+--------------------------------------------------------------------------------
+
+Impact base : **aucune** table modifiée par les classes du panier client.
+Référence logique uniquement vers `products` via les IDs chargés en catalogue.

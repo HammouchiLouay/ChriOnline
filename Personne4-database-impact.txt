@@ -1,0 +1,44 @@
+================================================================================
+ChriOnline — Personne 4 : impact base de données MySQL
+================================================================================
+Titre du poste (référence) : responsable des commandes, statuts et persistance
+(serveur & BDD) — Personne 4.
+
+Schéma de référence : sql/chrionline_schema_all.sql
+
+--------------------------------------------------------------------------------
+Tables principales
+--------------------------------------------------------------------------------
+
+orders
+  - INSERT : nouvelle commande (order_id, user_id, status, total_usd,
+    created_at).
+  - UPDATE : changement de statut (EN_ATTENTE, VALIDE, ANNULEE, PAYEE, etc.) —
+    services.CommandeService, persistence.CommandeDAO.
+  - SELECT : par order_id, par user_id (historique).
+
+order_lines
+  - INSERT : une ligne par produit (order_id, product_id, quantity,
+    unit_price_usd) ; fige nom/prix au moment de la commande côté serveur.
+  - DELETE : indirectement si les commandes utilisateur sont supprimées
+    (AccountDeletionDAO, Personne 1) — jointure sur orders.
+
+--------------------------------------------------------------------------------
+Lecture croisée (non-propriété exclusive)
+--------------------------------------------------------------------------------
+
+products
+  - Lecture lors de la création de commande (createCommandeAvecProduits) :
+    résolution nom/prix unitaire via product.ProductRepository.findById.
+  - Pas d’UPDATE produit dans le périmètre commande pur.
+
+user
+  - user_id dans orders référence `user`.id_user (FK). Pas d’INSERT/UPDATE user
+    dans CommandeService.
+
+--------------------------------------------------------------------------------
+Résumé
+--------------------------------------------------------------------------------
+
+Impact principal : tables **orders** et **order_lines**. Lecture **products**
+pour constituer les lignes ; **user** comme référence du propriétaire.

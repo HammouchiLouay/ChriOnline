@@ -1,0 +1,46 @@
+================================================================================
+ChriOnline — Personne 2 : impact base de données MySQL
+================================================================================
+Titre du poste (référence) : responsable catalogue, fiches produits et stock
+(Personne 2 — ChriOnline).
+
+Schéma de référence : sql/chrionline_schema_all.sql ; données exemple :
+sql/chrionline_products_data.sql
+
+--------------------------------------------------------------------------------
+Table principale
+--------------------------------------------------------------------------------
+
+products
+  - Lecture : catalogue public (liste, catégories, pagination, détail). Les
+    requêtes catalogue filtrées sur listing_status = APPROVED (ou NULL) pour
+    n’afficher que les fiches approuvées (product.ProductCatalogDAO,
+    product.ProductRepository, services.ProductService).
+  - Écriture : stock — UPDATE sur la colonne stock (STOCK_UPDATE). Pas de CRUD
+    catalogue complet en socket pour l’administration hors stock (hors flux
+    listing ci-dessous).
+  - Soumission vendeur / modération admin (services.ProductListingService) :
+    INSERT de fiches PENDING (insertPendingListing), colonnes typiques :
+    nom_produit, sku, marque, catégories, prix, stock, description, image,
+    listing_status, seller_id, submitted_at, etc.
+    SELECT listPending, listBySellerId ; UPDATE approve / reject sur
+    listing_status, reviewed_at, reviewed_by_user_id, rejection_reason.
+
+  - Clés étrangères : seller_id et reviewed_by_user_id → user.id_user (lecture
+    des rôles SELLER / ADMIN côté application).
+
+--------------------------------------------------------------------------------
+Tables non touchées directement par Personne 2
+--------------------------------------------------------------------------------
+
+orders, order_lines, historique_paiement, methode_paiement_enregistree : hors
+périmètre catalogue (gérées par Personnes 4–5). La table `user` n’est pas
+modifiée pour le métier catalogue sauf contrôle de rôle (lecture) lors des
+messages listing.
+
+--------------------------------------------------------------------------------
+Résumé
+--------------------------------------------------------------------------------
+
+Impact principal : table `products` (lecture, stock, workflow listing PENDING /
+APPROVED / REJECTED).

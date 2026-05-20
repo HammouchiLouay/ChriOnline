@@ -1,0 +1,35 @@
+ChriOnline — Personne 2 reference (English)
+Scope: MySQL product catalog (`products`), categories, product detail, stock updates; seller submission and admin moderation (`listing_status`); UI normalization; client-side product images (WebP). Server JDBC; clients use TCP JSON `Message`; lists and single product payloads use Base64 over binary Java serialization.
+
+Job title: responsible for catalog, product listings, and stock (Person 2).
+
+product.Product
+Serializable DTO for network transfer (id, name, description, price, stock, image URL, category, brand, rating). Minimal constructors; setStock for local updates.
+
+product.ProductListingInfo (record)
+Moderation / seller listing row: productId, name, sku, sellerId, listingStatus, submittedAtMs, rejectionReason.
+
+product.ProductCatalogDAO
+Static SQL on `products`. Public catalog queries filter listing_status APPROVED (or NULL). Methods: loadAll, loadByCategory, loadPage, loadPageByCategory, findByProductId, updateStock; insertPendingListing; listPending, listBySellerId; approve, reject (moderation). Private mapping applies TextUiNormalizer.
+
+product.ProductRepository
+Facade: JDBC-backed catalog with in-memory fallback on failure. getAll, getByCategory, getPage, findById (Optional), distinctCategories, updateStock.
+
+services.ProductService
+PRODUCT_LIST — empty or JSON category/limit/offset; serializes List<Product> to Base64. PRODUCT_DETAILS — payload is product id string; returns one Product or NOT_FOUND. STOCK_UPDATE — Base64 UpdateStockRequest { id, stock }. PRODUCT_CATEGORIES — JSON array with “Tous” first.
+
+services.ProductListingService
+SUBMIT_PRODUCT_LISTING — seller inserts PENDING row (sessionToken, role SELLER). LIST_PENDING_PRODUCTS — admin lists pending. LIST_MY_PRODUCT_LISTINGS — seller’s listings. APPROVE_PRODUCT_LISTING / REJECT_PRODUCT_LISTING — admin moderation. Uses SessionRegistry, UserDAO for role checks.
+
+common.TextUiNormalizer
+normalizeFrenchUi, categoryMatchVariants for SQL/UI consistency.
+
+ui.ProductImageLoader
+Loads remote images (e.g. WebP) for catalog grid.
+
+RequestRouter
+Routes PRODUCT_LIST, PRODUCT_CATEGORIES, PRODUCT_DETAILS, STOCK_UPDATE, SUBMIT_PRODUCT_LISTING, LIST_PENDING_PRODUCTS, LIST_MY_PRODUCT_LISTINGS, APPROVE_PRODUCT_LISTING, REJECT_PRODUCT_LISTING.
+
+Database impact: see Personne2-database-impact.txt (`products`).
+
+Detailed French spec: docs/equipe/PERSONNE-02-PRODUITS.md.
